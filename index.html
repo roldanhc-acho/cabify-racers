@@ -2,17 +2,52 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Cabify Racer - Córdoba</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cabify Racer Mobile - Córdoba</title>
     <style>
-        body { margin: 0; background: #1a1a1a; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: 'Courier New', Courier, monospace; }
-        #game-container { position: relative; }
-        canvas { background: #333; border-left: 10px double #fff; border-right: 10px double #fff; }
-        #stats { position: absolute; top: 10px; width: 100%; display: flex; justify-content: space-around; color: #00ff00; font-size: 20px; font-weight: bold; text-shadow: 2px 2px #000; }
+        * { box-sizing: border-box; touch-action: none; }
+        body { 
+            margin: 0; 
+            background: #1a1a1a; 
+            display: flex; 
+            flex-direction: column;
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh; 
+            overflow: hidden; 
+            font-family: sans-serif; 
+        }
+        #game-container { 
+            position: relative; 
+            width: 100vw; 
+            height: 100vh; 
+            max-width: 500px; /* Limite para tablets/PC */
+            background: #333;
+        }
+        canvas { 
+            display: block;
+            background: #333; 
+            border-left: 5px solid #555; 
+            border-right: 5px solid #555; 
+        }
+        #ui { 
+            position: absolute; 
+            top: 10px; 
+            width: 100%; 
+            display: flex; 
+            justify-content: space-around; 
+            color: #fff; 
+            font-size: 1.2rem; 
+            font-weight: bold; 
+            text-shadow: 2px 2px #000;
+            z-index: 10;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
     <div id="game-container">
-        <div id="stats">
+        <div id="ui">
             <div>Puntos: <span id="score">0</span></div>
             <div>Nivel: <span id="level">1</span></div>
         </div>
@@ -23,21 +58,26 @@
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
-// Configuración de dimensiones y carriles
-canvas.width = 400;
-canvas.height = 700;
+// Ajuste dinámico al tamaño de la pantalla vertical
+function resize() {
+    canvas.width = window.innerWidth > 500 ? 500 : window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
 const numLanes = 4;
 const laneWidth = canvas.width / numLanes;
-const carWidth = 60;  // Tamaño uniforme para todos
-const carHeight = 100;
+const carWidth = laneWidth * 0.7; // Ajuste proporcional al carril
+const carHeight = carWidth * 1.6;
 
 // Carga de Imágenes
 const images = {};
 let imagesLoaded = 0;
 const sources = {
-    taxi: 'taxi.png',    // Tu taxi con el logo de Cabify
-    enemy: 'enemy.png',  // Otros autos
-    coin: 'coin.png'     // Monedas
+    taxi: 'taxi.png',
+    enemy: 'enemy.png',
+    coin: 'coin.png'
 };
 
 for (let key in sources) {
@@ -46,79 +86,79 @@ for (let key in sources) {
     images[key].onload = () => imagesLoaded++;
 }
 
-// Estado del juego
+// Estado
 let score = 0;
 let level = 1;
 let gameSpeed = 5;
 let gameRunning = true;
-const keys = {};
 
 const taxi = {
-    x: (laneWidth * 1.5) - (carWidth / 2),
+    x: (canvas.width / 2) - (carWidth / 2),
     y: canvas.height - 150,
     w: carWidth,
-    h: carHeight,
-    speed: 7
+    h: carHeight
 };
 
 let obstacles = [];
 let coins = [];
 
-window.addEventListener("keydown", e => keys[e.code] = true);
-window.addEventListener("keyup", e => keys[e.code] = false);
+// CONTROLES TÁCTILES
+canvas.addEventListener("touchmove", (e) => {
+    if (!gameRunning) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    const touchX = touch.clientX - rect.left;
+    const touchY = touch.clientY - rect.top;
+
+    // Movimiento suave siguiendo el dedo
+    taxi.x = touchX - (taxi.w / 2);
+    taxi.y = touchY - (taxi.h / 2);
+
+    // Límites
+    if (taxi.x < 0) taxi.x = 0;
+    if (taxi.x > canvas.width - taxi.w) taxi.x = canvas.width - taxi.w;
+    if (taxi.y < 0) taxi.y = 0;
+    if (taxi.y > canvas.height - taxi.h) taxi.y = canvas.height - taxi.h;
+}, { passive: false });
 
 function update() {
     if (!gameRunning) return;
 
-    // Movimiento del Taxi (Limitado a los 4 carriles)
-    if (keys["ArrowLeft"] && taxi.x > 0) taxi.x -= taxi.speed;
-    if (keys["ArrowRight"] && taxi.x < canvas.width - taxi.w) taxi.x += taxi.speed;
-    if (keys["ArrowUp"] && taxi.y > 0) taxi.y -= taxi.speed;
-    if (keys["ArrowDown"] && taxi.y < canvas.height - taxi.h) taxi.y += taxi.speed;
-
-    // Dificultad Progresiva
     level = Math.floor(score / 100) + 1;
-    gameSpeed = 5 + (level * 0.5);
+    gameSpeed = 5 + (level * 0.8);
+    document.getElementById("score").innerText = score;
     document.getElementById("level").innerText = level;
 
-    // Lógica de Obstáculos
+    // Generar obstáculos por carriles
     if (Math.random() < 0.02 + (level * 0.005)) {
         const lane = Math.floor(Math.random() * numLanes);
         const xPos = (lane * laneWidth) + (laneWidth / 2) - (carWidth / 2);
-        
-        // Evitar que aparezcan dos autos en el mismo lugar exacto instantáneamente
-        if (obstacles.length === 0 || obstacles[obstacles.length-1].y > 150) {
+        if (obstacles.length === 0 || obstacles[obstacles.length-1].y > 200) {
             obstacles.push({ x: xPos, y: -carHeight, w: carWidth, h: carHeight });
         }
     }
 
     obstacles.forEach((obs, i) => {
         obs.y += gameSpeed;
-        // Colisión
         if (taxi.x < obs.x + obs.w && taxi.x + taxi.w > obs.x &&
             taxi.y < obs.y + obs.h && taxi.y + taxi.h > obs.y) {
             gameRunning = false;
-            alert("GAME OVER - Puntos: " + score);
+            alert("¡CHOQUE! Puntos: " + score);
             location.reload();
         }
         if (obs.y > canvas.height) obstacles.splice(i, 1);
     });
 
-    // Lógica de Monedas
-    if (Math.random() < 0.015) {
-        coins.push({ 
-            x: Math.random() * (canvas.width - 30), 
-            y: -30, 
-            r: 15 
-        });
+    // Monedas
+    if (Math.random() < 0.01) {
+        coins.push({ x: Math.random() * (canvas.width - 30), y: -30 });
     }
-
     coins.forEach((c, i) => {
         c.y += gameSpeed - 1;
         if (taxi.x < c.x + 30 && taxi.x + taxi.w > c.x &&
             taxi.y < c.y + 30 && taxi.y + taxi.h > c.y) {
             score += 10;
-            document.getElementById("score").innerText = score;
             coins.splice(i, 1);
         }
         if (c.y > canvas.height) coins.splice(i, 1);
@@ -128,9 +168,9 @@ function update() {
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Dibujar Carriles
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
-    ctx.setLineDash([20, 20]);
+    // Dibujar Carretera
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+    ctx.setLineDash([20, 30]);
     for (let i = 1; i < numLanes; i++) {
         ctx.beginPath();
         ctx.moveTo(i * laneWidth, 0);
@@ -138,36 +178,19 @@ function draw() {
         ctx.stroke();
     }
 
-    // Dibujar Monedas
+    // Dibujar elementos
     coins.forEach(c => {
-        if (imagesLoaded >= 3) {
-            ctx.drawImage(images.coin, c.x, c.y, 30, 30);
-        } else {
-            ctx.fillStyle = "gold";
-            ctx.beginPath(); ctx.arc(c.x + 15, c.y + 15, 15, 0, Math.PI*2); ctx.fill();
-        }
+        if (imagesLoaded >= 3) ctx.drawImage(images.coin, c.x, c.y, 35, 35);
+        else { ctx.fillStyle = "gold"; ctx.beginPath(); ctx.arc(c.x+15, c.y+15, 15, 0, Math.PI*2); ctx.fill(); }
     });
 
-    // Dibujar Obstáculos
     obstacles.forEach(obs => {
-        if (imagesLoaded >= 3) {
-            ctx.drawImage(images.enemy, obs.x, obs.y, obs.w, obs.h);
-        } else {
-            ctx.fillStyle = "red";
-            ctx.fillRect(obs.x, obs.y, obs.w, obs.h);
-        }
+        if (imagesLoaded >= 3) ctx.drawImage(images.enemy, obs.x, obs.y, obs.w, obs.h);
+        else { ctx.fillStyle = "red"; ctx.fillRect(obs.x, obs.y, obs.w, obs.h); }
     });
 
-    // Dibujar Taxi
-    if (imagesLoaded >= 3) {
-        ctx.drawImage(images.taxi, taxi.x, taxi.y, taxi.w, taxi.h);
-    } else {
-        ctx.fillStyle = "yellow";
-        ctx.fillRect(taxi.x, taxi.y, taxi.w, taxi.h);
-        ctx.fillStyle = "black";
-        ctx.font = "bold 10px Arial";
-        ctx.fillText("CABIFY", taxi.x + 10, taxi.y + 55);
-    }
+    if (imagesLoaded >= 3) ctx.drawImage(images.taxi, taxi.x, taxi.y, taxi.w, taxi.h);
+    else { ctx.fillStyle = "yellow"; ctx.fillRect(taxi.x, taxi.y, taxi.w, taxi.h); }
 }
 
 function loop() {
@@ -175,7 +198,6 @@ function loop() {
     draw();
     requestAnimationFrame(loop);
 }
-
 loop();
 </script>
 </body>
